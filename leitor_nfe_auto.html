@@ -1,0 +1,2001 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Leitor de Notas Fiscais XML - Automático</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { padding: 20px; }
+        .table { margin-top: 20px; width: 100%; }
+        h1 { margin-bottom: 20px; }
+        .hidden { display: none; }
+        .success { color: green; }
+        .error { color: red; }
+        .loading { margin-top: 20px; }
+        .produto-row { background-color: #f8f9fa; }
+        .btn-toggle { margin-bottom: 5px; }
+        .folder-path { font-family: monospace; background-color: #f8f9fa; padding: 5px; border-radius: 3px; }
+        .export-btn { margin-left: 10px; }
+        .filter-container { margin-bottom: 20px; }
+        .filter-input { max-width: 300px; }
+        .container-fluid { width: 100%; padding-right: 15px; padding-left: 15px; margin-right: auto; margin-left: auto; }
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); }
+        .modal-content { background-color: #fefefe; margin: 10% auto; padding: 20px; border: 1px solid #888; width: 80%; max-width: 900px; border-radius: 5px; }
+        .close-modal { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
+        .close-modal:hover, .close-modal:focus { color: black; text-decoration: none; cursor: pointer; }
+        .toast-notification { position: fixed; bottom: 20px; right: 20px; background-color: #333; color: white; padding: 15px; border-radius: 5px; z-index: 1001; }
+    </style>
+</head>
+<body>
+    <div class="container-fluid mt-5">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <h2 class="mb-0">Leitor de Notas Fiscais Eletrônicas</h2>
+            </div>
+            <div class="card-body">
+                <div class="row mb-4">
+                    <div class="col-12">
+                        <label for="xmlFiles" class="form-label">Selecione os arquivos XML das notas fiscais:</label>
+                        <input type="file" id="xmlFiles" accept=".xml" multiple class="form-control" />
+                    </div>
+                </div>
+                <div id="status" class="alert alert-info">Selecione os arquivos XML para processar.</div>
+                <div id="progressContainer" class="progress mb-4 hidden">
+                    <div id="progressBar" class="progress-bar" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+                </div>
+        
+        <div id="loadingIndicator" class="loading text-center hidden">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Carregando...</span>
+            </div>
+            <p>Processando arquivos, por favor aguarde...</p>
+        </div>
+        
+        <div id="resultContainer" class="hidden">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h2>Resultado</h2>
+                <div>
+                    <button id="exportExcelBtn" class="btn btn-success export-btn">Exportar para Excel</button>
+                    <button id="exportCsvBtn" class="btn btn-info export-btn">Exportar para CSV</button>
+                </div>
+            </div>
+            
+            <!-- Container para exibir duplicatas -->
+            <div id="duplicatasContainer" class="hidden mb-4"></div>
+            
+            <!-- Abas para alternar entre Notas Fiscais e Escolas -->
+            <ul class="nav nav-tabs mb-3" id="resultTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="notas-tab" data-bs-toggle="tab" data-bs-target="#notas-content" type="button" role="tab" aria-controls="notas-content" aria-selected="true">Notas Fiscais</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="escolas-tab" data-bs-toggle="tab" data-bs-target="#escolas-content" type="button" role="tab" aria-controls="escolas-content" aria-selected="false">Escolas</button>
+                </li>
+            </ul>
+            
+            <div class="tab-content" id="resultTabsContent">
+                <!-- Aba de Notas Fiscais -->
+                <div class="tab-pane fade show active" id="notas-content" role="tabpanel" aria-labelledby="notas-tab">
+                    <div class="filter-container">
+                        <div class="row">
+                            <div class="col-md-3 mb-2">
+                                <label for="filterRegional" class="form-label">Regional:</label>
+                                <select id="filterRegional" class="form-select filter-select">
+                                    <option value="">Todas as regionais</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3 mb-2">
+                                <label for="filterMunicipio" class="form-label">Município:</label>
+                                <select id="filterMunicipio" class="form-select filter-select">
+                                    <option value="">Todos os municípios</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3 mb-2">
+                                <label for="filterEscola" class="form-label">Escola:</label>
+                                <input type="text" id="filterEscola" class="form-control filter-input" placeholder="Digite o nome da escola...">
+                            </div>
+                            <div class="col-md-3 mb-2">
+                                <label for="filterInput" class="form-label">Filtro geral:</label>
+                                <input type="text" id="filterInput" class="form-control filter-input" placeholder="Filtrar por CENSO ou número NF...">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="table-responsive">
+                        <table id="resultTable" class="table table-striped table-bordered">
+                            <thead>
+                                <tr>
+                                    <th>Chave de Acesso</th>
+                                    <th>Número da NF</th>
+                                    <th>Valor Líquido</th>
+                                    <th>CENSO</th>
+                                    <th>Nome da Escola</th>
+                                    <th>Regional</th>
+                                    <th>Município</th>
+                                    <th>Valores Consistentes</th>
+                                    <th>Nome do Arquivo</th>
+                                    <th>Produtos</th>
+                                </tr>
+                            </thead>
+                            <tbody id="resultBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- Aba de Escolas -->
+                <div class="tab-pane fade" id="escolas-content" role="tabpanel" aria-labelledby="escolas-tab">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h2>Escolas</h2>
+                        <div>
+                            <button id="exportEscolasExcelBtn" class="btn btn-success export-btn">Exportar para Excel</button>
+                            <button id="exportEscolasCsvBtn" class="btn btn-info export-btn">Exportar para CSV</button>
+                        </div>
+                    </div>
+                    
+                    <div class="filter-container">
+                        <div class="row">
+                            <div class="col-md-3 mb-2">
+                                <label for="filterRegionalEscolas" class="form-label">Regional:</label>
+                                <select id="filterRegionalEscolas" class="form-select filter-select">
+                                    <option value="">Todas as regionais</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3 mb-2">
+                                <label for="filterMunicipioEscolas" class="form-label">Município:</label>
+                                <select id="filterMunicipioEscolas" class="form-select filter-select">
+                                    <option value="">Todos os municípios</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3 mb-2">
+                                <label for="filterEscolaEscolas" class="form-label">Escola:</label>
+                                <input type="text" id="filterEscolaEscolas" class="form-control filter-input" placeholder="Digite o nome da escola...">
+                            </div>
+                            <div class="col-md-3 mb-2">
+                                <label for="filterStatusEscolas" class="form-label">Status:</label>
+                                <select id="filterStatusEscolas" class="form-select filter-select">
+                                    <option value="">Todos os status</option>
+                                    <option value="excesso">Com mais de 2 notas</option>
+                                    <option value="completo">Com 2 notas</option>
+                                    <option value="incompleto">Com 1 nota</option>
+                                    <option value="sem_notas">Sem notas</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="table-responsive">
+                        <table id="escolasTable" class="table table-striped table-bordered">
+                            <thead>
+                                <tr>
+                                    <th>CENSO</th>
+                                    <th>Nome da Escola</th>
+                                    <th>Regional</th>
+                                    <th>Município</th>
+                                    <th>Status</th>
+                                    <th>Notas Fiscais</th>
+                                </tr>
+                            </thead>
+                            <tbody id="escolasBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div id="produtosContainer"></div>
+    </div>
+
+    <script>
+        // Função para extrair texto de um elemento XML
+        function getElementText(element, xpath, namespaces) {
+            if (!element) return 'N/A';
+            
+            const nsResolver = namespaces ? 
+                function(prefix) { return namespaces[prefix] || null; } : null;
+            
+            try {
+                const result = document.evaluate(xpath, element, nsResolver, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+                const node = result.singleNodeValue;
+                return node ? node.textContent : 'N/A';
+            } catch (e) {
+                console.error('Erro ao avaliar XPath:', xpath, e);
+                return 'N/A';
+            }
+        }
+        
+        // Função para extrair atributo de um elemento XML
+        function getElementAttribute(element, xpath, attribute, namespaces) {
+            if (!element) return 'N/A';
+            
+            const nsResolver = namespaces ? 
+                function(prefix) { return namespaces[prefix] || null; } : null;
+            
+            try {
+                const result = document.evaluate(xpath, element, nsResolver, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+                const node = result.singleNodeValue;
+                return node && node.getAttribute(attribute) ? node.getAttribute(attribute) : 'N/A';
+            } catch (e) {
+                console.error('Erro ao avaliar XPath para atributo:', xpath, attribute, e);
+                return 'N/A';
+            }
+        }
+        
+        // Função para selecionar múltiplos elementos XML
+        function selectElements(element, xpath, namespaces) {
+            if (!element) return [];
+            
+            const nsResolver = namespaces ? 
+                function(prefix) { return namespaces[prefix] || null; } : null;
+            
+            try {
+                const result = document.evaluate(xpath, element, nsResolver, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+                const elements = [];
+                for (let i = 0; i < result.snapshotLength; i++) {
+                    elements.push(result.snapshotItem(i));
+                }
+                return elements;
+            } catch (e) {
+                console.error('Erro ao selecionar elementos:', xpath, e);
+                return [];
+            }
+        }
+        
+        // Função para extrair dados de uma nota fiscal XML
+        function extrairDadosNFe(xmlDoc) {
+            // Definir namespaces
+            const namespaces = {
+                'nfe': 'http://www.portalfiscal.inf.br/nfe'
+            };
+            
+            // Extrair a chave de acesso
+            const infNFe = xmlDoc.querySelector('infNFe');
+            let chaveAcesso = 'N/A';
+            if (infNFe && infNFe.getAttribute('Id')) {
+                chaveAcesso = infNFe.getAttribute('Id').replace('NFe', '');
+            }
+            
+            // Extrair o número da NF
+            const numeroNF = getElementText(xmlDoc, '//nfe:nNF', namespaces);
+            
+            // Extrair produtos, quantidades e valores
+            const detElements = selectElements(xmlDoc, '//nfe:det', namespaces);
+            const produtos = [];
+            
+            detElements.forEach(det => {
+                const nomeProd = getElementText(det, './/nfe:xProd', namespaces);
+                const qtd = getElementText(det, './/nfe:qCom', namespaces);
+                const valorUnit = getElementText(det, './/nfe:vUnCom', namespaces);
+                const valorTotal = getElementText(det, './/nfe:vProd', namespaces);
+                
+                produtos.push({
+                    nome: nomeProd,
+                    quantidade: parseFloat(qtd) || 0,
+                    valorUnitario: parseFloat(valorUnit) || 0,
+                    valorTotal: parseFloat(valorTotal) || 0
+                });
+            });
+            
+            // Extrair valor total da nota
+            const valorLiquido = parseFloat(getElementText(xmlDoc, '//nfe:vNF', namespaces)) || 0;
+            
+            // Extrair informações adicionais
+            let infoTexto = getElementText(xmlDoc, '//nfe:infAdFisco', namespaces);
+            let infoCpl = getElementText(xmlDoc, '//nfe:infCpl', namespaces);
+            
+            // Combinar informações de ambos os campos para busca
+            if (infoTexto === 'N/A') {
+                infoTexto = infoCpl;
+            } else if (infoCpl !== 'N/A') {
+                // Se ambos os campos têm informações, concatená-los para busca
+                infoTexto = infoTexto + ' ' + infoCpl;
+            }
+            
+            console.log('infAdFisco:', getElementText(xmlDoc, '//nfe:infAdFisco', namespaces));
+            console.log('infCpl:', infoCpl);
+            
+            // Extrair CENSO da escola
+            let censo = 'N/A';
+            // Padrões para encontrar o censo
+            let censoPatterns = [
+                /LOTE\s+\d+\s+-\s+Censo\s+(\d+)/, // Padrão: "LOTE 1 - Censo 12345"
+                /Censo\s+(\d+)\s+-\s+/, // Padrão: "Censo 12345 - Nome Escola"
+                /Censo\s+(\d+)/ // Padrão: "Censo 12345"
+            ];
+            
+            for (let pattern of censoPatterns) {
+                let match = infoTexto.match(pattern);
+                if (match) {
+                    censo = match[1];
+                    console.log('Censo encontrado com padrão:', pattern, 'valor:', censo);
+                    break;
+                }
+            }
+            
+            if (censo === 'N/A') {
+                console.log('Censo não encontrado. Texto completo:', infoTexto);
+            }
+            
+            // Extrair nome da escola
+            let nomeEscola = 'N/A';
+            // Padrões para encontrar o nome da escola
+            let escolaPatterns = [
+                /LOTE\s+\d+\s+-\s+Censo\s+\d+\s+-\s+CE\s+([^-\s][^-]*?[^\s-]*)(?:\s+-|\s*$)/, // Padrão: "LOTE 1 - Censo 12345 - CE Nome Escola"
+                /Censo\s+\d+\s+-\s+CE\s+([^-\s][^-]*?[^\s-]*)(?:\s+-|\s*$)/, // Padrão: "Censo 12345 - CE Nome Escola"
+                /CE\s+([^-\s][^-]*?[^\s-]*)(?:\s+-|\s*$)/, // Padrão: "CE Nome Escola"
+                /Censo\s+\d+\s+-\s+([^-]+)/ // Padrão: "Censo 12345 - Nome Escola"
+            ];
+            
+            for (let pattern of escolaPatterns) {
+                let match = infoTexto.match(pattern);
+                if (match) {
+                    nomeEscola = match[1].trim();
+                    console.log('Nome da escola encontrado com padrão:', pattern, 'valor:', nomeEscola);
+                    break;
+                }
+            }
+            
+            if (nomeEscola === 'N/A') {
+                console.log('Nome da escola não encontrado. Texto completo:', infoTexto);
+            }
+            
+            console.log('Informações extraídas:', { censo, nomeEscola, infoTexto });
+            
+            // Verificar se o somatório dos valores singulares está de acordo com o valor líquido total
+            const somaProdutos = produtos.reduce((sum, p) => sum + p.valorTotal, 0);
+            const valoresConsistentes = Math.abs(somaProdutos - valorLiquido) < 0.01; // Tolerância para diferenças de arredondamento
+            
+            return {
+                chaveAcesso,
+                numeroNF,
+                produtos,
+                valorLiquido,
+                censo,
+                nomeEscola,
+                valoresConsistentes
+            };
+        }
+        
+        // Função para gerar link para a nota na Receita Federal
+        function gerarLinkNFe(chaveAcesso) {
+            return `https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?tipoConsulta=completa&tipoConteudo=XbSeqxE8pl8=&nfe=${chaveAcesso}`;
+        }
+        
+        // Função para formatar valor como moeda
+        function formatarMoeda(valor) {
+            return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valor);
+        }
+        
+        // Função para mostrar produtos em um popup modal
+        function toggleProdutos(id) {
+            const element = document.getElementById(id);
+            const modal = document.getElementById('produtosModal');
+            const modalContent = document.getElementById('produtosModalContent');
+            
+            // Copiar o conteúdo para o modal
+            modalContent.innerHTML = element.innerHTML;
+            
+            // Exibir o modal
+            modal.style.display = 'block';
+            
+            // Fechar o modal quando clicar no X
+            document.querySelector('.close-modal').onclick = function() {
+                modal.style.display = 'none';
+            }
+            
+            // Fechar o modal quando clicar fora dele
+            window.onclick = function(event) {
+                if (event.target == modal) {
+                    modal.style.display = 'none';
+                }
+            }
+        }
+        
+        // Variável global para armazenar os dados das escolas
+        let dadosEscolas = [];
+        
+        // Função para carregar o CSV de escolas
+        async function carregarDadosEscolas() {
+            try {
+                console.log('Iniciando carregamento do arquivo escolas.csv...');
+                
+                // Usando fetch em vez de XMLHttpRequest para carregar o arquivo
+                return new Promise((resolve, reject) => {
+                    // Criar um elemento para exibir mensagem ao usuário
+                    const msgElement = document.createElement('div');
+                    msgElement.style.position = 'fixed';
+                    msgElement.style.top = '50%';
+                    msgElement.style.left = '50%';
+                    msgElement.style.transform = 'translate(-50%, -50%)';
+                    msgElement.style.padding = '20px';
+                    msgElement.style.backgroundColor = '#f8f9fa';
+                    msgElement.style.border = '1px solid #dee2e6';
+                    msgElement.style.borderRadius = '5px';
+                    msgElement.style.boxShadow = '0 0 10px rgba(0,0,0,0.1)';
+                    msgElement.style.zIndex = '9999';
+                    msgElement.innerHTML = `
+                        <h3>Erro de CORS ao carregar o arquivo</h3>
+                        <p>Devido a restrições de segurança do navegador, não é possível carregar o arquivo CSV diretamente.</p>
+                        <p>Por favor, selecione o arquivo <strong>escolas.csv</strong> manualmente:</p>
+                        <div id="fileInputContainer" style="margin-top: 15px;"></div>
+                    `;
+                    document.body.appendChild(msgElement);
+                    
+                    // Criar um elemento de input de arquivo
+                    const fileInput = document.createElement('input');
+                    fileInput.type = 'file';
+                    fileInput.accept = '.csv';
+                    fileInput.style.display = 'block';
+                    fileInput.style.margin = '10px auto';
+                    document.getElementById('fileInputContainer').appendChild(fileInput);
+                    
+                    // Adicionar botão para fechar a mensagem
+                    const closeButton = document.createElement('button');
+                    closeButton.textContent = 'Cancelar';
+                    closeButton.style.marginTop = '15px';
+                    closeButton.style.padding = '5px 10px';
+                    closeButton.style.backgroundColor = '#f8f9fa';
+                    closeButton.style.border = '1px solid #dee2e6';
+                    closeButton.style.borderRadius = '3px';
+                    closeButton.style.cursor = 'pointer';
+                    closeButton.onclick = function() {
+                        document.body.removeChild(msgElement);
+                        reject(new Error('Seleção de arquivo cancelada pelo usuário'));
+                    };
+                    msgElement.appendChild(closeButton);
+                    
+                    // Configurar o manipulador de eventos para quando um arquivo for selecionado
+                    fileInput.addEventListener('change', function(event) {
+                        const file = event.target.files[0];
+                        if (!file) {
+                            console.error('Nenhum arquivo selecionado');
+                            document.body.removeChild(msgElement);
+                            reject(new Error('Nenhum arquivo selecionado'));
+                            return;
+                        }
+                        
+                        console.log('Arquivo selecionado:', file.name, 'tamanho:', file.size, 'bytes');
+                        
+                        const reader = new FileReader();
+                        
+                        reader.onload = function(e) {
+                            const csvText = e.target.result;
+                            console.log('Arquivo carregado, tamanho:', csvText.length, 'bytes');
+                            document.body.removeChild(msgElement);
+                            
+                            if (!csvText || csvText.trim() === '') {
+                                console.error('Arquivo CSV está vazio');
+                                resolve([]);
+                                return;
+                            }
+                            
+                            // Remover BOM se existir
+                            const cleanText = csvText.replace(/^\ufeff/, '');
+                            
+                            // Processar o CSV - suporta diferentes formatos de quebra de linha
+                            const linhas = cleanText.split(/\r?\n/);
+                            console.log('Número de linhas no CSV:', linhas.length);
+                            
+                            if (linhas.length <= 1) {
+                                console.error('Arquivo CSV vazio ou com apenas o cabeçalho');
+                                resolve([]);
+                                return;
+                            }
+                            
+                            // Verificar se o cabeçalho está duplicado (como visto no arquivo)
+                            let startIndex = 0;
+                            if (linhas.length > 1 && linhas[0].trim() === linhas[1].trim()) {
+                                console.log('Cabeçalho duplicado detectado, ignorando a segunda linha');
+                                startIndex = 1; // Começar a processar a partir da linha 2 (índice 1)
+                            }
+                            
+                            const cabecalho = linhas[0].split(';').map(col => col.trim());
+                            console.log('Cabeçalho do CSV:', cabecalho);
+                            
+                            // Encontrar índices das colunas dinamicamente (case insensitive)
+                            const censoIndex = cabecalho.findIndex(col => col.toLowerCase() === 'ni');
+                            const regionalIndex = cabecalho.findIndex(col => col.toLowerCase() === 'regional');
+                            const municipioIndex = cabecalho.findIndex(col => col.toLowerCase() === 'municipio');
+                            const escolaIndex = cabecalho.findIndex(col => col.toLowerCase() === 'escola');
+                            
+                            console.log('Índices encontrados:', { 
+                                censo: censoIndex, 
+                                regional: regionalIndex, 
+                                municipio: municipioIndex, 
+                                escola: escolaIndex 
+                            });
+                            
+                            // Verificar se encontrou todas as colunas necessárias
+                            if (censoIndex === -1 || regionalIndex === -1 || municipioIndex === -1 || escolaIndex === -1) {
+                                console.error('Cabeçalho do CSV não contém todas as colunas necessárias');
+                                console.error('Cabeçalho encontrado:', cabecalho);
+                                console.error('Colunas esperadas: ni, REGIONAL, MUNICIPIO, ESCOLA');
+                                resolve([]);
+                                return;
+                            }
+                            
+                            // Criar array de objetos com os dados das escolas
+                            const escolas = [];
+                            let linhasValidas = 0;
+                            let linhasIgnoradas = 0;
+                            let linhasVazias = 0;
+                            let linhasDuplicadas = 0;
+                            
+                            // Conjunto para rastrear linhas já processadas e evitar duplicatas
+                            const linhasProcessadas = new Set();
+                            
+                            for (let i = startIndex + 1; i < linhas.length; i++) {
+                                if (linhas[i].trim() === '') {
+                                    linhasVazias++;
+                                    continue; // Pular linhas vazias
+                                }
+                                
+                                // Verificar se a linha é duplicada
+                                if (linhasProcessadas.has(linhas[i])) {
+                                    linhasDuplicadas++;
+                                    continue; // Pular linhas duplicadas
+                                }
+                                
+                                linhasProcessadas.add(linhas[i]);
+                                
+                                const valores = linhas[i].split(';');
+                                
+                                // Verificar se a linha tem todos os campos necessários
+                                if (valores.length <= Math.max(censoIndex, regionalIndex, municipioIndex, escolaIndex)) {
+                                    console.warn(`Linha ${i} incompleta (${valores.length} campos):`, linhas[i]);
+                                    linhasIgnoradas++;
+                                    continue;
+                                }
+                                
+                                const censo = valores[censoIndex]?.trim() || '';
+                                const regional = valores[regionalIndex]?.trim() || '';
+                                const municipio = valores[municipioIndex]?.trim() || '';
+                                const nome = valores[escolaIndex]?.trim() || '';
+                                
+                                // Verificar se os valores essenciais estão presentes
+                                if (!censo) {
+                                    console.warn(`Linha ${i} sem CENSO válido:`, linhas[i]);
+                                    linhasIgnoradas++;
+                                    continue;
+                                }
+                                
+                                const escola = {
+                                    censo: censo,
+                                    regional: regional,
+                                    municipio: municipio,
+                                    nome: nome
+                                };
+                                escolas.push(escola);
+                                linhasValidas++;
+                            }
+                            
+                            console.log(`Processamento do CSV: ${linhasValidas} linhas válidas, ${linhasIgnoradas} ignoradas, ${linhasVazias} vazias, ${linhasDuplicadas} duplicadas`);
+                            console.log(`Total de escolas carregadas: ${escolas.length}`);
+                            
+                            // Verificar os primeiros registros para debug
+                            if (escolas.length > 0) {
+                                console.log('Primeiras 3 escolas carregadas:');
+                                for (let i = 0; i < Math.min(3, escolas.length); i++) {
+                                    console.log(escolas[i]);
+                                }
+                                
+                                // Verificar se há regionais e municípios
+                                const regionaisEncontradas = new Set(escolas.map(e => e.regional).filter(r => r && r.trim() !== ''));
+                                const municipiosEncontrados = new Set(escolas.map(e => e.municipio).filter(m => m && m.trim() !== ''));
+                                
+                                console.log(`Encontradas ${regionaisEncontradas.size} regionais e ${municipiosEncontrados.size} municípios únicos`);
+                                console.log('Exemplos de regionais:', [...regionaisEncontradas].slice(0, 5));
+                                console.log('Exemplos de municípios:', [...municipiosEncontrados].slice(0, 5));
+                            } else {
+                                console.error('Nenhuma escola válida encontrada no CSV');
+                            }
+                            
+                            resolve(escolas);
+                        };
+                        
+                        reader.onerror = function() {
+                            console.error('Erro ao ler o arquivo');
+                            document.body.removeChild(fileInput);
+                            reject(new Error('Erro ao ler o arquivo'));
+                        };
+                        
+                        reader.readAsText(file);
+                    });
+                    
+                    // Simular um clique no input para abrir o diálogo de seleção de arquivo
+                    fileInput.click();
+                });
+            } catch (error) {
+                console.error('Erro ao carregar dados das escolas:', error);
+                return [];
+            }
+        }
+        
+        // Função para preencher os filtros de regionais e municípios
+        function preencherFiltros(escolas) {
+            console.log('Preenchendo filtros com', escolas.length, 'escolas');
+            
+            // Verificar se os elementos de filtro existem (case sensitive)
+            const filterRegional = document.getElementById('filterRegional');
+            const filterMunicipio = document.getElementById('filterMunicipio');
+            
+            // Verificar se os elementos foram encontrados
+            if (!filterRegional) {
+                console.error('Elemento filterRegional não encontrado. Verificando com outras variações de case...');
+                // Tentar encontrar com outras variações de case
+                const allSelects = document.getElementsByTagName('select');
+                for (let i = 0; i < allSelects.length; i++) {
+                    if (allSelects[i].id.toLowerCase() === 'filterregional') {
+                        console.log('Encontrado elemento select com ID similar:', allSelects[i].id);
+                    }
+                }
+            }
+            
+            if (!filterMunicipio) {
+                console.error('Elemento filterMunicipio não encontrado. Verificando com outras variações de case...');
+                // Tentar encontrar com outras variações de case
+                const allSelects = document.getElementsByTagName('select');
+                for (let i = 0; i < allSelects.length; i++) {
+                    if (allSelects[i].id.toLowerCase() === 'filtermunicipio') {
+                        console.log('Encontrado elemento select com ID similar:', allSelects[i].id);
+                    }
+                }
+            }
+            
+            if (!filterRegional || !filterMunicipio) {
+                console.error('Elementos de filtro não encontrados na função preencherFiltros');
+                console.error('IDs procurados: filterRegional, filterMunicipio');
+                console.error('Todos os selects na página:');
+                const allSelects = document.getElementsByTagName('select');
+                for (let i = 0; i < allSelects.length; i++) {
+                    console.log(`- Select #${i}: id='${allSelects[i].id}', name='${allSelects[i].name}'`);
+                }
+                return;
+            }
+            
+            console.log('Elementos de filtro encontrados em preencherFiltros:', {
+                filterRegional: filterRegional ? `OK (id=${filterRegional.id})` : 'Não encontrado',
+                filterMunicipio: filterMunicipio ? `OK (id=${filterMunicipio.id})` : 'Não encontrado'
+            });
+            
+            // Limpar opções existentes
+            filterRegional.innerHTML = '<option value="">Todas as regionais</option>';
+            filterMunicipio.innerHTML = '<option value="">Todos os municípios</option>';
+            
+            console.log('Opções existentes limpas');
+            
+            if (!escolas || escolas.length === 0) {
+                console.error('Nenhuma escola para preencher os filtros');
+                return;
+            }
+            
+            // Verificar se as escolas têm as propriedades esperadas
+            const primeiraEscola = escolas[0];
+            console.log('Verificando primeira escola:', primeiraEscola);
+            
+            if (!primeiraEscola.hasOwnProperty('regional') || !primeiraEscola.hasOwnProperty('municipio')) {
+                console.error('As escolas não têm as propriedades regional ou municipio');
+                console.error('Propriedades disponíveis:', Object.keys(primeiraEscola).join(', '));
+                return;
+            }
+            
+            // Obter valores únicos de regionais e municípios, filtrando valores vazios, nulos ou false
+            const regionais = [...new Set(escolas.map(e => e.regional))]
+                .filter(regional => regional && regional.trim() !== '')
+                .sort();
+            const municipios = [...new Set(escolas.map(e => e.municipio))]
+                .filter(municipio => municipio && municipio.trim() !== '')
+                .sort();
+            
+            console.log('Regionais únicas encontradas:', regionais.length);
+            console.log('Municípios únicos encontrados:', municipios.length);
+            
+            if (regionais.length === 0) {
+                console.error('Nenhuma regional encontrada nos dados das escolas');
+                // Verificar se há algum valor de regional nos dados
+                const todasRegionais = escolas.map(e => e.regional);
+                console.error('Valores de regional encontrados (primeiros 10):', todasRegionais.slice(0, 10));
+                console.error('Valores vazios:', todasRegionais.filter(r => !r || r.trim() === '').length);
+            }
+            
+            if (municipios.length === 0) {
+                console.error('Nenhum município encontrado nos dados das escolas');
+                // Verificar se há algum valor de município nos dados
+                const todosMunicipios = escolas.map(e => e.municipio);
+                console.error('Valores de município encontrados (primeiros 10):', todosMunicipios.slice(0, 10));
+                console.error('Valores vazios:', todosMunicipios.filter(m => !m || m.trim() === '').length);
+            }
+            
+            console.log('Primeiras 5 regionais encontradas:', regionais.slice(0, 5));
+            console.log('Primeiros 5 municípios encontrados:', municipios.slice(0, 5));
+            
+            // Preencher select de regionais
+            let regionaisAdicionadas = 0;
+            regionais.forEach(regional => {
+                if (regional) { // Verificação adicional
+                    const option = document.createElement('option');
+                    option.value = regional;
+                    option.textContent = regional;
+                    filterRegional.appendChild(option);
+                    regionaisAdicionadas++;
+                }
+            });
+            
+            // Preencher select de municípios
+            let municipiosAdicionados = 0;
+            municipios.forEach(municipio => {
+                if (municipio) { // Verificação adicional
+                    const option = document.createElement('option');
+                    option.value = municipio;
+                    option.textContent = municipio;
+                    filterMunicipio.appendChild(option);
+                    municipiosAdicionados++;
+                }
+            });
+            
+            console.log('Opções de regionais adicionadas:', regionaisAdicionadas, '(total:', filterRegional.options.length - 1, ')');
+            console.log('Opções de municípios adicionadas:', municipiosAdicionados, '(total:', filterMunicipio.options.length - 1, ')');
+            
+            // Evento para filtrar municípios quando a regional for selecionada
+            filterRegional.addEventListener('change', function() {
+                const regionalSelecionada = this.value;
+                
+                // Limpar e recriar opções de municípios
+                filterMunicipio.innerHTML = '<option value="">Todos os municípios</option>';
+                
+                if (regionalSelecionada) {
+                    // Filtrar municípios pela regional selecionada
+                    const municipiosFiltrados = [...new Set(
+                        escolas
+                            .filter(e => e.regional === regionalSelecionada)
+                            .map(e => e.municipio)
+                    )].filter(Boolean).sort();
+                    
+                    municipiosFiltrados.forEach(municipio => {
+                        const option = document.createElement('option');
+                        option.value = municipio;
+                        option.textContent = municipio;
+                        filterMunicipio.appendChild(option);
+                    });} else {
+                    // Se nenhuma regional selecionada, mostrar todos os municípios
+                    municipios.forEach(municipio => {
+                        const option = document.createElement('option');
+                        option.value = municipio;
+                        option.textContent = municipio;
+                        filterMunicipio.appendChild(option);
+                    });
+                }
+                
+                // Aplicar filtros
+                aplicarFiltros();
+            });
+            
+            // Eventos para aplicar filtros quando os valores mudarem
+            filterMunicipio.addEventListener('change', aplicarFiltros);
+            document.getElementById('filterEscola').addEventListener('keyup', aplicarFiltros);
+        }
+        
+        // Função para aplicar todos os filtros à tabela
+        function aplicarFiltros() {
+            const regionalSelecionada = document.getElementById('filterRegional').value.toLowerCase();
+            const municipioSelecionado = document.getElementById('filterMunicipio').value.toLowerCase();
+            const escolaFiltro = document.getElementById('filterEscola').value.toLowerCase();
+            const filtroGeral = document.getElementById('filterInput').value.toLowerCase();
+            
+            const linhas = document.getElementById('resultBody').getElementsByTagName('tr');
+            
+            for (let i = 0; i < linhas.length; i++) {
+                const linha = linhas[i];
+                const colunas = linha.getElementsByTagName('td');
+                
+                // Obter valores das colunas relevantes
+                const censo = colunas[3].textContent.toLowerCase();
+                const nomeEscola = colunas[4].textContent.toLowerCase();
+                const regional = colunas[5].textContent.toLowerCase();
+                const municipio = colunas[6].textContent.toLowerCase();
+                const numeroNF = colunas[1].textContent.toLowerCase();
+                
+                // Verificar se atende a todos os filtros ativos
+                const atendeRegional = !regionalSelecionada || regional === regionalSelecionada;
+                const atendeMunicipio = !municipioSelecionado || municipio === municipioSelecionado;
+                const atendeEscola = !escolaFiltro || nomeEscola.includes(escolaFiltro);
+                const atendeFiltroGeral = !filtroGeral || 
+                                         censo.includes(filtroGeral) || 
+                                         numeroNF.includes(filtroGeral);
+                
+                // Exibir ou ocultar linha com base nos filtros
+                if (atendeRegional && atendeMunicipio && atendeEscola && atendeFiltroGeral) {
+                    linha.style.display = '';
+                } else {
+                    linha.style.display = 'none';
+                }
+            }
+        }
+        
+        // Função para processar os arquivos XML selecionados manualmente
+        async function processarArquivosManualmente(files) {
+            const resultBody = document.getElementById('resultBody');
+            const produtosContainer = document.getElementById('produtosContainer');
+            const status = document.getElementById('status');
+            const progressContainer = document.getElementById('progressContainer');
+            const progressBar = document.getElementById('progressBar');
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            const resultContainer = document.getElementById('resultContainer');
+            
+            resultBody.innerHTML = '';
+            produtosContainer.innerHTML = '';
+            status.innerHTML = `Processando ${files.length} arquivo(s)...`;
+            progressContainer.classList.remove('hidden');
+            loadingIndicator.classList.remove('hidden');
+            resultContainer.classList.add('hidden');
+            
+            const dadosNFes = [];
+            let processados = 0;
+            let arquivosNaoProcessados = [];
+            
+            for (const file of files) {
+                try {
+                    const text = await file.text();
+                    const parser = new DOMParser();
+                    const xmlDoc = parser.parseFromString(text, 'application/xml');
+                    
+                    // Verificar se é um XML válido de NFe
+                    if (xmlDoc.querySelector('nfeProc') || xmlDoc.querySelector('NFe')) {
+                        const dados = extrairDadosNFe(xmlDoc);
+                        dados.nomeArquivo = file.name; // Adicionar nome do arquivo
+                        
+                        // Buscar informações adicionais da escola pelo CENSO
+                        if (dados.censo !== 'N/A') {
+                            const escolaInfo = dadosEscolas.find(e => e.censo === dados.censo);
+                            if (escolaInfo) {
+                                dados.regional = escolaInfo.regional;
+                                dados.municipio = escolaInfo.municipio;
+                                // Atualizar nome da escola se estiver como N/A
+                                if (dados.nomeEscola === 'N/A') {
+                                    dados.nomeEscola = escolaInfo.nome;
+                                }
+                            } else {
+                                dados.regional = 'N/A';
+                                dados.municipio = 'N/A';
+                            }
+                        } else {
+                            dados.regional = 'N/A';
+                            dados.municipio = 'N/A';
+                        }
+                        
+                        dadosNFes.push(dados);
+                    } else {
+                        console.warn(`Arquivo ${file.name} não parece ser uma NFe válida.`);
+                        arquivosNaoProcessados.push(file.name);
+                    }
+                } catch (e) {
+                    console.error(`Erro ao processar arquivo ${file.name}:`, e);
+                    arquivosNaoProcessados.push(file.name);
+                }
+                
+                processados++;
+                const percentual = Math.round((processados / files.length) * 100);
+                progressBar.style.width = `${percentual}%`;
+                progressBar.textContent = `${percentual}%`;
+            }
+            
+            // Ordenar por número da NF
+            dadosNFes.sort((a, b) => parseInt(a.numeroNF) - parseInt(b.numeroNF));
+            
+            // Preencher a tabela de notas fiscais com os dados
+            preencherTabelaResultados(dadosNFes, resultBody, produtosContainer, arquivosNaoProcessados);
+            
+            // Preencher a tabela de escolas
+            preencherTabelaEscolas(dadosNFes);
+            
+            // Atualizar status
+            status.innerHTML = `Processados ${dadosNFes.length} arquivo(s) com sucesso. ${arquivosNaoProcessados.length > 0 ? arquivosNaoProcessados.length + ' arquivo(s) não processado(s).' : ''}`;
+            progressContainer.classList.add('hidden');
+            loadingIndicator.classList.add('hidden');
+            resultContainer.classList.remove('hidden');
+            
+            // Ativar a aba de Notas Fiscais por padrão
+            document.getElementById('notasFiscaisTab').classList.add('active');
+            document.getElementById('escolasTab').classList.remove('active');
+            document.querySelector('a[href="#notasFiscaisTab"]').classList.add('active');
+            document.querySelector('a[href="#escolasTab"]').classList.remove('active');
+            
+            return dadosNFes;
+        }
+        
+        // Função para detectar notas fiscais duplicadas (mesmo CENSO e valor)
+        function detectarDuplicatas(dadosNFes) {
+            const duplicatas = [];
+            const mapa = {};
+            
+            // Agrupar notas por CENSO e valor
+            dadosNFes.forEach((nfe, index) => {
+                // Criar uma chave única combinando CENSO e valor
+                const chave = `${nfe.censo}_${nfe.valorLiquido.toFixed(2)}`;
+                
+                if (!mapa[chave]) {
+                    mapa[chave] = [];
+                }
+                
+                mapa[chave].push({
+                    index,
+                    chaveAcesso: nfe.chaveAcesso,
+                    numeroNF: nfe.numeroNF
+                });
+            });
+            
+            // Identificar grupos com mais de uma nota (duplicatas)
+            for (const chave in mapa) {
+                if (mapa[chave].length > 1) {
+                    duplicatas.push({
+                        chave,
+                        notas: mapa[chave]
+                    });
+                }
+            }
+            
+            return duplicatas;
+        }
+        
+        // Função para identificar escolas com mais de 2 notas fiscais
+        function identificarEscolasComMaisNotas(dadosNFes) {
+            // Agrupar notas por CENSO
+            const notasPorCenso = {};
+            const escolasComMaisNotas = [];
+            
+            // Ignorar notas com erro ou sem CENSO
+            dadosNFes.filter(nfe => !nfe.erro && nfe.censo !== 'N/A').forEach(nfe => {
+                if (!notasPorCenso[nfe.censo]) {
+                    notasPorCenso[nfe.censo] = [];
+                }
+                
+                notasPorCenso[nfe.censo].push(nfe);
+            });
+            
+            // Identificar escolas com mais de 2 notas
+            for (const censo in notasPorCenso) {
+                if (notasPorCenso[censo].length > 2) {
+                    escolasComMaisNotas.push({
+                        censo,
+                        nomeEscola: notasPorCenso[censo][0].nomeEscola,
+                        quantidade: notasPorCenso[censo].length,
+                        notas: notasPorCenso[censo]
+                    });
+                }
+            }
+            
+            return escolasComMaisNotas;
+        }
+        
+        // Função para identificar chaves de acesso com valores iguais
+        function identificarChavesAcessoIguais(dadosNFes) {
+            // Agrupar notas por chave de acesso
+            const notasPorChave = {};
+            const chavesIguais = [];
+            
+            // Ignorar notas com erro ou sem chave de acesso
+            dadosNFes.filter(nfe => !nfe.erro && nfe.chaveAcesso !== 'N/A').forEach(nfe => {
+                if (!notasPorChave[nfe.chaveAcesso]) {
+                    notasPorChave[nfe.chaveAcesso] = [];
+                }
+                
+                notasPorChave[nfe.chaveAcesso].push(nfe);
+            });
+            
+            // Identificar chaves que aparecem mais de uma vez
+            for (const chave in notasPorChave) {
+                if (notasPorChave[chave].length > 1) {
+                    chavesIguais.push({
+                        chaveAcesso: chave,
+                        quantidade: notasPorChave[chave].length,
+                        notas: notasPorChave[chave]
+                    });
+                }
+            }
+            
+            return chavesIguais;
+        }
+        
+        // Função para copiar texto para a área de transferência
+        function copiarParaClipboard(texto) {
+            navigator.clipboard.writeText(texto)
+                .then(() => {
+                    // Feedback visual temporário
+                    const toast = document.createElement('div');
+                    toast.className = 'toast-notification';
+                    toast.textContent = 'Chave de acesso copiada!';
+                    document.body.appendChild(toast);
+                    
+                    // Remover após 2 segundos
+                    setTimeout(() => {
+                        document.body.removeChild(toast);
+                    }, 2000);
+                })
+                .catch(err => {
+                    console.error('Erro ao copiar texto: ', err);
+                    alert('Não foi possível copiar a chave de acesso.');
+                });
+        }
+        
+        // Função para preencher a tabela de resultados
+        function preencherTabelaResultados(dadosNFes, resultBody, produtosContainer, arquivosNaoProcessados = []) {
+            // Limpar conteúdos anteriores
+            resultBody.innerHTML = '';
+            produtosContainer.innerHTML = '';
+            
+            // Detectar duplicatas
+            const duplicatas = detectarDuplicatas(dadosNFes);
+            
+            // Identificar escolas com mais de 2 notas fiscais
+            const escolasComMaisNotas = identificarEscolasComMaisNotas(dadosNFes);
+            
+            // Identificar chaves de acesso iguais
+            const chavesAcessoIguais = identificarChavesAcessoIguais(dadosNFes);
+            
+            // Contar valores inconsistentes
+            const valoresInconsistentes = dadosNFes.filter(nfe => !nfe.valoresConsistentes).length;
+            
+            // Contar notas processadas corretamente e com erro
+            const totalNotas = dadosNFes.length;
+            const notasComErro = dadosNFes.filter(nfe => nfe.chaveAcesso === 'N/A' || nfe.numeroNF === 'N/A').length;
+            const notasProcessadasCorretamente = totalNotas - notasComErro;
+            
+            // Criar resumo estatístico
+            const resumoDiv = document.createElement('div');
+            resumoDiv.className = 'alert alert-info mb-4';
+            resumoDiv.innerHTML = `
+                <h5>📊 Resumo do Processamento</h5>
+                <ul>
+                    <li><strong>Total de notas processadas:</strong> ${totalNotas}</li>
+                    <li><strong>Notas processadas corretamente:</strong> ${notasProcessadasCorretamente}</li>
+                    ${notasComErro > 0 ? `<li><strong>Notas com erro de processamento:</strong> ${notasComErro}</li>` : ''}
+                    <li><strong>Notas com valores inconsistentes:</strong> ${valoresInconsistentes}</li>
+                    <li><strong>Notas possivelmente duplicadas:</strong> ${duplicatas.length > 0 ? duplicatas.reduce((total, dup) => total + dup.notas.length, 0) : 0}</li>
+                    <li><strong>Escolas com mais de 2 notas fiscais:</strong> ${escolasComMaisNotas.length}</li>
+                    <li><strong>Notas com chaves de acesso iguais:</strong> ${chavesAcessoIguais.length > 0 ? chavesAcessoIguais.reduce((total, chave) => total + chave.quantidade, 0) : 0}</li>
+                    ${arquivosNaoProcessados.length > 0 ? `<li><strong>Arquivos não processados:</strong> ${arquivosNaoProcessados.length}</li>` : ''}
+                </ul>
+            `;
+            
+            // Adicionar resumo ao início do container de resultados
+            const resultContainer = document.getElementById('resultContainer');
+            const resultTitle = resultContainer.querySelector('h2').parentNode;
+            resultContainer.insertBefore(resumoDiv, resultTitle);
+            
+            // Criar div para exibir chaves de acesso iguais, se houver
+            if (chavesAcessoIguais.length > 0) {
+                const chavesIguaisDiv = document.createElement('div');
+                chavesIguaisDiv.className = 'alert alert-danger mt-3';
+                chavesIguaisDiv.innerHTML = `<h5>🔑 Atenção: Foram encontradas ${chavesAcessoIguais.length} chaves de acesso repetidas!</h5>`;
+                
+                const listaChaves = document.createElement('ul');
+                chavesAcessoIguais.forEach(item => {
+                    const li = document.createElement('li');
+                    const notasInfo = item.notas.map(n => `NF ${n.numeroNF}`).join(', ');
+                    li.innerHTML = `<strong>Chave: ${item.chaveAcesso.substring(0, 15)}...</strong> - ${item.quantidade} ocorrências (${notasInfo})`;
+                    listaChaves.appendChild(li);
+                });
+                
+                chavesIguaisDiv.appendChild(listaChaves);
+                document.getElementById('duplicatasContainer').before(chavesIguaisDiv);
+            }
+            
+            // Criar div para exibir escolas com mais de 2 notas, se houver
+            if (escolasComMaisNotas.length > 0) {
+                const escolasComMaisNotasDiv = document.createElement('div');
+                escolasComMaisNotasDiv.className = 'alert alert-primary mt-3';
+                escolasComMaisNotasDiv.innerHTML = `<h5>🔍 Escolas com mais de 2 notas fiscais (${escolasComMaisNotas.length}):</h5>`;
+                
+                const listaEscolas = document.createElement('ul');
+                escolasComMaisNotas.forEach(escola => {
+                    const item = document.createElement('li');
+                    item.innerHTML = `<strong>CENSO ${escola.censo} - ${escola.nomeEscola}</strong>: ${escola.quantidade} notas fiscais`;
+                    listaEscolas.appendChild(item);
+                });
+                
+                escolasComMaisNotasDiv.appendChild(listaEscolas);
+                document.getElementById('duplicatasContainer').before(escolasComMaisNotasDiv);
+            }
+            
+            // Criar div para exibir duplicatas, se houver
+            if (duplicatas.length > 0) {
+                const duplicatasDiv = document.createElement('div');
+                duplicatasDiv.className = 'alert alert-warning mt-3';
+                duplicatasDiv.innerHTML = `<h5>⚠️ Atenção: Foram encontradas ${duplicatas.length} possíveis duplicatas!</h5>`;
+                
+                duplicatas.forEach(dup => {
+                    const [censo, valor] = dup.chave.split('_');
+                    const notasInfo = dup.notas.map(n => `NF ${n.numeroNF} (${n.chaveAcesso.substring(0, 10)}...)`).join(', ');
+                    
+                    duplicatasDiv.innerHTML += `
+                        <div class="mb-2">
+                            <strong>CENSO ${censo} - Valor ${formatarMoeda(parseFloat(valor))}</strong><br>
+                            Notas duplicadas: ${notasInfo}
+                        </div>
+                    `;
+                });
+                
+                document.getElementById('duplicatasContainer').innerHTML = '';
+                document.getElementById('duplicatasContainer').appendChild(duplicatasDiv);
+                document.getElementById('duplicatasContainer').classList.remove('hidden');
+            } else {
+                document.getElementById('duplicatasContainer').classList.add('hidden');
+            }
+            
+            // Exibir arquivos não processados, se houver
+            if (arquivosNaoProcessados.length > 0) {
+                const arquivosNaoProcessadosDiv = document.createElement('div');
+                arquivosNaoProcessadosDiv.className = 'alert alert-danger mt-3';
+                arquivosNaoProcessadosDiv.innerHTML = `<h5>❌ Arquivos não processados (${arquivosNaoProcessados.length}):</h5>`;
+                
+                const listaArquivos = document.createElement('ul');
+                arquivosNaoProcessados.forEach(arquivo => {
+                    const item = document.createElement('li');
+                    item.textContent = arquivo;
+                    listaArquivos.appendChild(item);
+                });
+                
+                arquivosNaoProcessadosDiv.appendChild(listaArquivos);
+                document.getElementById('duplicatasContainer').after(arquivosNaoProcessadosDiv);
+            }
+            
+            // Preparar dados para exibição na tabela
+            const notasOrdenadas = [];
+            const notasRestantes = [...dadosNFes];
+            
+            // 1. Primeiro as notas com chaves de acesso iguais
+            if (chavesAcessoIguais.length > 0) {
+                chavesAcessoIguais.forEach(chaveIgual => {
+                    chaveIgual.notas.forEach(nfe => {
+                        // Adicionar flag para destacar na tabela
+                        notasOrdenadas.push({...nfe, destaqueChaveIgual: true});
+                        
+                        // Remover da lista de notas restantes
+                        const index = notasRestantes.findIndex(n => n.chaveAcesso === nfe.chaveAcesso);
+                        if (index !== -1) {
+                            notasRestantes.splice(index, 1);
+                        }
+                    });
+                });
+            }
+            
+            // 2. Depois as notas de escolas com mais de 2 notas
+            if (escolasComMaisNotas.length > 0) {
+                escolasComMaisNotas.forEach(escola => {
+                    escola.notas.forEach(nfe => {
+                        // Verificar se a nota já foi adicionada (pode estar em chaves iguais)
+                        if (!notasOrdenadas.some(n => n.chaveAcesso === nfe.chaveAcesso)) {
+                            // Adicionar flag para destacar na tabela
+                            notasOrdenadas.push({...nfe, destaque: true});
+                            
+                            // Remover da lista de notas restantes
+                            const index = notasRestantes.findIndex(n => n.chaveAcesso === nfe.chaveAcesso);
+                            if (index !== -1) {
+                                notasRestantes.splice(index, 1);
+                            }
+                        }
+                    });
+                });
+            }
+            
+            // 2. Adicionar as notas restantes
+            notasRestantes.forEach(nfe => {
+                notasOrdenadas.push({...nfe, destaque: false});
+            });
+            
+            // Preencher a tabela com os dados ordenados
+            notasOrdenadas.forEach((nfe, index) => {
+                if (nfe.erro) return; // Pular arquivos com erro
+                
+                const row = document.createElement('tr');
+                
+                // Verificar se esta nota tem chave de acesso igual a outra (prioridade máxima)
+                const temChaveIgual = nfe.destaqueChaveIgual || chavesAcessoIguais.some(chave => {
+                    return chave.notas.some(n => n.chaveAcesso === nfe.chaveAcesso);
+                });
+                
+                if (temChaveIgual) {
+                    row.classList.add('table-danger');
+                }
+                // Adicionar classe para destacar inconsistências (se não for chave igual)
+                else if (!nfe.valoresConsistentes) {
+                    row.classList.add('table-danger');
+                } else if (nfe.censo === 'N/A' || nfe.nomeEscola === 'N/A') {
+                    row.classList.add('table-warning');
+                }
+                
+                // Verificar se esta nota está em alguma duplicata
+                const estaDuplicada = duplicatas.some(dup => {
+                    return dup.notas.some(n => n.chaveAcesso === nfe.chaveAcesso);
+                });
+                
+                if (estaDuplicada && !temChaveIgual) {
+                    row.classList.add('table-info');
+                }
+                
+                // Destacar escolas com mais de 2 notas (se não for chave igual)
+                if (nfe.destaque && !temChaveIgual) {
+                    row.classList.add('table-primary');
+                }
+                
+                // Chave de Acesso com link e botão de cópia
+                const linkNFe = gerarLinkNFe(nfe.chaveAcesso);
+                row.innerHTML = `
+                    <td>
+                        <div class="d-flex align-items-center">
+                            <a href="${linkNFe}" target="_blank" class="me-2">${nfe.chaveAcesso}</a>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="copiarParaClipboard('${nfe.chaveAcesso}')" title="Copiar chave de acesso">
+                                <i class="bi bi-clipboard"></i>
+                            </button>
+                        </div>
+                    </td>
+                    <td>${nfe.numeroNF}</td>
+                    <td>${formatarMoeda(nfe.valorLiquido)}</td>
+                    <td>${nfe.censo}</td>
+                    <td>${nfe.nomeEscola}</td>
+                    <td>${nfe.regional || 'N/A'}</td>
+                    <td>${nfe.municipio || 'N/A'}</td>
+                    <td class="${nfe.valoresConsistentes ? 'success' : 'error'}">${nfe.valoresConsistentes ? 'Sim' : 'Não'}</td>
+                    <td>${nfe.nomeArquivo || 'N/A'}</td>
+                    <td><button class="btn btn-sm btn-primary btn-toggle" onclick="toggleProdutos('produtos_${index}')">Ver Produtos</button></td>
+                `;
+                
+                resultBody.appendChild(row);
+                
+                // Criar tabela de produtos
+                const produtosDiv = document.createElement('div');
+                produtosDiv.id = `produtos_${index}`;
+                produtosDiv.className = 'mt-3 mb-4 hidden';
+                
+                let produtosHTML = `
+                    <div class="card">
+                        <div class="card-header bg-primary text-white">
+                            Produtos da NF ${nfe.numeroNF}
+                        </div>
+                        <div class="card-body">
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>Produto</th>
+                                        <th>Quantidade</th>
+                                        <th>Valor Unitário</th>
+                                        <th>Valor Total</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                `;
+                
+                nfe.produtos.forEach(produto => {
+                    produtosHTML += `
+                        <tr>
+                            <td>${produto.nome}</td>
+                            <td>${produto.quantidade.toFixed(2)}</td>
+                            <td>${formatarMoeda(produto.valorUnitario)}</td>
+                            <td>${formatarMoeda(produto.valorTotal)}</td>
+                        </tr>
+                    `;
+                });
+                
+                produtosHTML += `
+                                </tbody>
+                                <tfoot>
+                                    <tr class="table-dark">
+                                        <td colspan="3" class="text-end"><strong>Total:</strong></td>
+                                        <td><strong>${formatarMoeda(nfe.produtos.reduce((sum, p) => sum + p.valorTotal, 0))}</strong></td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    </div>
+                `;
+                
+                produtosDiv.innerHTML = produtosHTML;
+                produtosContainer.appendChild(produtosDiv);
+            });
+        }
+        
+        // Função para exportar dados para Excel
+        function exportarParaExcel(dados) {
+            // Criar uma tabela para exportação
+            let html = '<table>';
+            
+            // Cabeçalho
+            html += '<tr>';
+            html += '<th>Chave de Acesso</th>';
+            html += '<th>Número da NF</th>';
+            html += '<th>Valor Líquido</th>';
+            html += '<th>CENSO</th>';
+            html += '<th>Nome da Escola</th>';
+            html += '<th>Regional</th>';
+            html += '<th>Município</th>';
+            html += '<th>Valores Consistentes</th>';
+            html += '<th>Nome do Arquivo</th>';
+            html += '<th>Link NFe</th>';
+            html += '</tr>';
+            
+            // Dados
+            dados.forEach(nfe => {
+                html += '<tr>';
+                html += `<td>${nfe.chaveAcesso}</td>`;
+                html += `<td>${nfe.numeroNF}</td>`;
+                html += `<td>${nfe.valorLiquido}</td>`;
+                html += `<td>${nfe.censo}</td>`;
+                html += `<td>${nfe.nomeEscola}</td>`;
+                html += `<td>${nfe.regional || 'N/A'}</td>`;
+                html += `<td>${nfe.municipio || 'N/A'}</td>`;
+                html += `<td>${nfe.valoresConsistentes ? 'Sim' : 'Não'}</td>`;
+                html += `<td>${nfe.nomeArquivo || 'N/A'}</td>`;
+                html += `<td>${gerarLinkNFe(nfe.chaveAcesso)}</td>`;
+                html += '</tr>';
+            });
+            
+            html += '</table>';
+            
+            // Converter para formato compatível com Excel
+            const blob = new Blob([html], { type: 'application/vnd.ms-excel' });
+            const url = URL.createObjectURL(blob);
+            
+            // Criar link para download
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'notas_fiscais.xls';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+        
+        // Função para exportar dados para CSV
+        function exportarParaCSV(dados) {
+            // Cabeçalho
+            let csv = 'Chave de Acesso,Número da NF,Valor Líquido,CENSO,Nome da Escola,Regional,Município,Valores Consistentes,Nome do Arquivo,Link NFe\n';
+            
+            // Dados
+            dados.forEach(nfe => {
+                const linha = [
+                    `"${nfe.chaveAcesso}"`,
+                    `"${nfe.numeroNF}"`,
+                    `"${nfe.valorLiquido}"`,
+                    `"${nfe.censo}"`,
+                    `"${nfe.nomeEscola.replace(/"/g, '""')}"`,
+                    `"${(nfe.regional || 'N/A').replace(/"/g, '""')}"`,
+                    `"${(nfe.municipio || 'N/A').replace(/"/g, '""')}"`,
+                    `"${nfe.valoresConsistentes ? 'Sim' : 'Não'}"`,
+                    `"${(nfe.nomeArquivo || 'N/A').replace(/"/g, '""')}"`,
+                    `"${gerarLinkNFe(nfe.chaveAcesso)}"`
+                ];
+                csv += linha.join(',') + '\n';
+            });
+            
+            // Converter para blob e criar link para download
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'notas_fiscais.csv';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+        
+        // Função para filtrar a tabela
+        function filtrarTabela() {
+            const filtro = document.getElementById('filterInput').value.toLowerCase();
+            const linhas = document.getElementById('resultBody').getElementsByTagName('tr');
+            
+            for (let i = 0; i < linhas.length; i++) {
+                const linha = linhas[i];
+                const texto = linha.textContent.toLowerCase();
+                
+                if (texto.includes(filtro)) {
+                    linha.style.display = '';
+                } else {
+                    linha.style.display = 'none';
+                }
+            }
+        }
+        
+        // Função para filtrar a tabela de escolas
+        function filtrarTabelaEscolas() {
+            const filtro = document.getElementById('filterInputEscolas').value.toLowerCase();
+            const linhas = document.getElementById('escolasBody').getElementsByTagName('tr');
+            
+            for (let i = 0; i < linhas.length; i++) {
+                const linha = linhas[i];
+                const texto = linha.textContent.toLowerCase();
+                
+                if (texto.includes(filtro)) {
+                    linha.style.display = '';
+                } else {
+                    linha.style.display = 'none';
+                }
+            }
+        }
+        
+        // Função para preencher a tabela de escolas
+        function preencherTabelaEscolas(dadosNFes) {
+            const escolasBody = document.getElementById('escolasBody');
+            escolasBody.innerHTML = '';
+            
+            // Se não houver dados de escolas, exibir mensagem
+            if (!dadosEscolas || dadosEscolas.length === 0) {
+                const row = document.createElement('tr');
+                row.innerHTML = '<td colspan="6" class="text-center">Nenhum dado de escola carregado. Por favor, carregue o arquivo CSV de escolas.</td>';
+                escolasBody.appendChild(row);
+                return;
+            }
+            
+            // Contar notas por escola
+            const notasPorEscola = {};
+            
+            // Inicializar todas as escolas com 0 notas
+            dadosEscolas.forEach(escola => {
+                notasPorEscola[escola.censo] = {
+                    censo: escola.censo,
+                    nome: escola.nome,
+                    regional: escola.regional,
+                    municipio: escola.municipio,
+                    quantidadeNotas: 0,
+                    notas: []
+                };
+            });
+            
+            // Contar notas para cada escola
+            dadosNFes.forEach(nfe => {
+                if (nfe.censo !== 'N/A' && notasPorEscola[nfe.censo]) {
+                    notasPorEscola[nfe.censo].quantidadeNotas++;
+                    notasPorEscola[nfe.censo].notas.push(nfe);
+                }
+            });
+            
+            // Converter para array e ordenar por regional, município e nome
+            const escolasArray = Object.values(notasPorEscola);
+            escolasArray.sort((a, b) => {
+                if (a.regional !== b.regional) return a.regional.localeCompare(b.regional);
+                if (a.municipio !== b.municipio) return a.municipio.localeCompare(b.municipio);
+                return a.nome.localeCompare(b.nome);
+            });
+            
+            // Preencher a tabela
+            escolasArray.forEach(escola => {
+                const row = document.createElement('tr');
+                
+                // Definir classe com base na quantidade de notas
+                if (escola.quantidadeNotas > 2) {
+                    row.classList.add('table-danger');
+                } else if (escola.quantidadeNotas === 2) {
+                    row.classList.add('table-success');
+                } else if (escola.quantidadeNotas === 1) {
+                    row.classList.add('table-warning');
+                } else {
+                    row.classList.add('table-secondary');
+                }
+                
+                // Definir status com base na quantidade de notas
+                let status = '';
+                if (escola.quantidadeNotas > 2) {
+                    status = `<span class="badge bg-danger">Excesso (${escola.quantidadeNotas})</span>`;
+                } else if (escola.quantidadeNotas === 2) {
+                    status = '<span class="badge bg-success">Completo</span>';
+                } else if (escola.quantidadeNotas === 1) {
+                    status = '<span class="badge bg-warning text-dark">Incompleto</span>';
+                } else {
+                    status = '<span class="badge bg-secondary">Sem notas</span>';
+                }
+                
+                // Criar botão para ver notas (se houver)
+                let botoesNotas = '';
+                if (escola.quantidadeNotas > 0) {
+                    botoesNotas = `<button class="btn btn-sm btn-primary btn-toggle" onclick="toggleNotasEscola('notas_escola_${escola.censo}')">Ver Notas</button>`;
+                } else {
+                    botoesNotas = '<span class="text-muted">Nenhuma nota</span>';
+                }
+                
+                row.innerHTML = `
+                    <td>${escola.censo}</td>
+                    <td>${escola.nome}</td>
+                    <td>${escola.regional}</td>
+                    <td>${escola.municipio}</td>
+                    <td>${status}</td>
+                    <td>${botoesNotas}</td>
+                `;
+                
+                escolasBody.appendChild(row);
+                
+                // Se houver notas, criar div para exibi-las
+                if (escola.quantidadeNotas > 0) {
+                    const notasDiv = document.createElement('tr');
+                    notasDiv.id = `notas_escola_${escola.censo}`;
+                    notasDiv.className = 'hidden';
+                    
+                    let notasHTML = `
+                        <td colspan="6">
+                            <div class="card mt-2 mb-2">
+                                <div class="card-header bg-primary text-white">
+                                    Notas Fiscais de ${escola.nome}
+                                </div>
+                                <div class="card-body">
+                                    <table class="table table-sm">
+                                        <thead>
+                                            <tr>
+                                                <th>Número NF</th>
+                                                <th>Chave de Acesso</th>
+                                                <th>Valor Líquido</th>
+                                                <th>Data de Emissão</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                    `;
+                    
+                    escola.notas.forEach(nota => {
+                        notasHTML += `
+                            <tr>
+                                <td>${nota.numeroNF}</td>
+                                <td>${nota.chaveAcesso}</td>
+                                <td>${formatarMoeda(nota.valorLiquido)}</td>
+                                <td>${nota.dataEmissao || 'N/A'}</td>
+                            </tr>
+                        `;
+                    });
+                    
+                    notasHTML += `
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </td>
+                    `;
+                    
+                    notasDiv.innerHTML = notasHTML;
+                    escolasBody.appendChild(notasDiv);
+                }
+            });
+            
+            // Atualizar contadores
+            const totalEscolas = escolasArray.length;
+            const escolasSemNotas = escolasArray.filter(e => e.quantidadeNotas === 0).length;
+            const escolasComUmaNota = escolasArray.filter(e => e.quantidadeNotas === 1).length;
+            const escolasComDuasNotas = escolasArray.filter(e => e.quantidadeNotas === 2).length;
+            const escolasComMaisNotas = escolasArray.filter(e => e.quantidadeNotas > 2).length;
+            
+            // Criar resumo estatístico
+            const resumoDiv = document.createElement('div');
+            resumoDiv.className = 'alert alert-info mb-4';
+            resumoDiv.innerHTML = `
+                <h5>📊 Resumo das Escolas</h5>
+                <ul>
+                    <li><strong>Total de escolas:</strong> ${totalEscolas}</li>
+                    <li><strong>Escolas sem notas fiscais:</strong> ${escolasSemNotas} (${Math.round(escolasSemNotas/totalEscolas*100)}%)</li>
+                    <li><strong>Escolas com 1 nota fiscal:</strong> ${escolasComUmaNota} (${Math.round(escolasComUmaNota/totalEscolas*100)}%)</li>
+                    <li><strong>Escolas com 2 notas fiscais:</strong> ${escolasComDuasNotas} (${Math.round(escolasComDuasNotas/totalEscolas*100)}%)</li>
+                    <li><strong>Escolas com mais de 2 notas:</strong> ${escolasComMaisNotas} (${Math.round(escolasComMaisNotas/totalEscolas*100)}%)</li>
+                </ul>
+            `;
+            
+            // Adicionar resumo ao início do container de escolas
+            const escolasTab = document.getElementById('escolas-content');
+            const escolasTitle = escolasTab.querySelector('h2');
+            if (escolasTitle) {
+                escolasTitle.parentNode.insertBefore(resumoDiv, escolasTitle);
+            } else {
+                escolasTab.insertBefore(resumoDiv, escolasTab.firstChild);
+            }
+        }
+        
+        // Função para alternar a visibilidade das notas de uma escola
+        function toggleNotasEscola(id) {
+            const element = document.getElementById(id);
+            if (element) {
+                element.classList.toggle('hidden');
+            }
+        }
+        
+        // Função para aplicar filtros na tabela de escolas
+        function aplicarFiltrosEscolas() {
+            const regional = document.getElementById('filterRegionalEscolas').value;
+            const municipio = document.getElementById('filterMunicipioEscolas').value;
+            const status = document.getElementById('filterStatusEscolas').value;
+            const linhas = document.getElementById('escolasBody').getElementsByTagName('tr');
+            
+            for (let i = 0; i < linhas.length; i++) {
+                const linha = linhas[i];
+                
+                // Pular linhas que são expansões de notas
+                if (linha.id && linha.id.startsWith('notas_escola_')) {
+                    continue;
+                }
+                
+                const colunas = linha.getElementsByTagName('td');
+                if (colunas.length < 5) continue; // Pular linhas sem colunas suficientes
+                
+                const escolaRegional = colunas[2].textContent;
+                const escolaMunicipio = colunas[3].textContent;
+                const escolaStatus = colunas[4].textContent;
+                
+                let mostrar = true;
+                
+                // Aplicar filtro de regional
+                if (regional && escolaRegional !== regional) {
+                    mostrar = false;
+                }
+                
+                // Aplicar filtro de município
+                if (municipio && escolaMunicipio !== municipio) {
+                    mostrar = false;
+                }
+                
+                // Aplicar filtro de status
+                if (status) {
+                    if (status === 'sem_notas' && !escolaStatus.includes('Sem notas')) {
+                        mostrar = false;
+                    } else if (status === 'incompleto' && !escolaStatus.includes('Incompleto')) {
+                        mostrar = false;
+                    } else if (status === 'completo' && !escolaStatus.includes('Completo')) {
+                        mostrar = false;
+                    } else if (status === 'excesso' && !escolaStatus.includes('Excesso')) {
+                        mostrar = false;
+                    }
+                }
+                
+                linha.style.display = mostrar ? '' : 'none';
+                
+                // Se esta linha tem notas expandidas, esconder também
+                const censoMatch = linha.querySelector('td:first-child');
+                if (censoMatch && censoMatch.textContent) {
+                    const censo = censoMatch.textContent;
+                    const notasDiv = document.getElementById(`notas_escola_${censo}`);
+                    if (notasDiv) {
+                        notasDiv.style.display = mostrar ? (notasDiv.classList.contains('hidden') ? 'none' : '') : 'none';
+                    }
+                }
+            }
+        }
+        
+        // Função para preencher os filtros da aba de escolas
+        function preencherFiltrosEscolas() {
+            const filterRegionalEscolas = document.getElementById('filterRegionalEscolas');
+            const filterMunicipioEscolas = document.getElementById('filterMunicipioEscolas');
+            const filterStatusEscolas = document.getElementById('filterStatusEscolas');
+            
+            // Verificar se os elementos existem
+            if (!filterRegionalEscolas || !filterMunicipioEscolas || !filterStatusEscolas) {
+                console.error('Elementos de filtro da aba Escolas não encontrados!');
+                return;
+            }
+            
+            // Limpar opções atuais
+            filterRegionalEscolas.innerHTML = '<option value="">Todas as Regionais</option>';
+            filterMunicipioEscolas.innerHTML = '<option value="">Todos os Municípios</option>';
+            filterStatusEscolas.innerHTML = `
+                <option value="">Todos os Status</option>
+                <option value="sem_notas">Sem Notas</option>
+                <option value="incompleto">Incompleto (1 nota)</option>
+                <option value="completo">Completo (2 notas)</option>
+                <option value="excesso">Excesso (>2 notas)</option>
+            `;
+            
+            // Se não houver dados de escolas, retornar
+            if (!dadosEscolas || dadosEscolas.length === 0) {
+                return;
+            }
+            
+            // Obter regionais únicas
+            const regionais = [...new Set(dadosEscolas.map(escola => escola.regional))].sort();
+            
+            // Preencher opções de regionais
+            regionais.forEach(regional => {
+                const option = document.createElement('option');
+                option.value = regional;
+                option.textContent = regional;
+                filterRegionalEscolas.appendChild(option);
+            });
+            
+            // Configurar evento para atualizar municípios quando a regional mudar
+            filterRegionalEscolas.addEventListener('change', function() {
+                const regionalSelecionada = this.value;
+                
+                // Limpar opções atuais
+                filterMunicipioEscolas.innerHTML = '<option value="">Todos os Municípios</option>';
+                
+                // Se nenhuma regional selecionada, não preencher municípios
+                if (!regionalSelecionada) {
+                    return;
+                }
+                
+                // Obter municípios da regional selecionada
+                const municipios = [...new Set(
+                    dadosEscolas
+                        .filter(escola => escola.regional === regionalSelecionada)
+                        .map(escola => escola.municipio)
+                )].sort();
+                
+                // Preencher opções de municípios
+                municipios.forEach(municipio => {
+                    const option = document.createElement('option');
+                    option.value = municipio;
+                    option.textContent = municipio;
+                    filterMunicipioEscolas.appendChild(option);
+                });
+            });
+        }
+        
+        
+        // Configurar eventos
+        document.addEventListener('DOMContentLoaded', async function() {
+            const xmlFilesInput = document.getElementById('xmlFiles');
+            const exportExcelBtn = document.getElementById('exportExcelBtn');
+            const exportCsvBtn = document.getElementById('exportCsvBtn');
+            const filterInput = document.getElementById('filterInput');
+            const filterInputEscolas = document.getElementById('filterInputEscolas');
+            const filterRegional = document.getElementById('filterRegional');
+            const filterMunicipio = document.getElementById('filterMunicipio');
+            const filterRegionalEscolas = document.getElementById('filterRegionalEscolas');
+            const filterMunicipioEscolas = document.getElementById('filterMunicipioEscolas');
+            const filterStatusEscolas = document.getElementById('filterStatusEscolas');
+            
+            let dadosProcessados = [];
+            
+            // Verificar se os elementos de filtro existem
+            if (!filterRegional || !filterMunicipio) {
+                console.error('Elementos de filtro não encontrados!');
+                document.getElementById('status').innerHTML = '<span class="error">Erro: Elementos de filtro não encontrados na página.</span>';
+                return;
+            }
+            
+            console.log('Elementos de filtro encontrados:', {
+                filterRegional: filterRegional ? 'OK' : 'Não encontrado',
+                filterMunicipio: filterMunicipio ? 'OK' : 'Não encontrado'
+            });
+            
+            // Carregar dados das escolas
+            try {
+                const status = document.getElementById('status');
+                status.innerHTML = 'Carregando dados das escolas...';
+                
+                // Limpar os filtros antes de carregar novos dados
+                filterRegional.innerHTML = '<option value="">Todas as regionais</option>';
+                filterMunicipio.innerHTML = '<option value="">Todos os municípios</option>';
+                
+                console.log('Filtros limpos. Carregando dados das escolas...');
+                dadosEscolas = await carregarDadosEscolas();
+                
+                console.log('Dados carregados:', {
+                    totalEscolas: dadosEscolas.length,
+                    primeiraEscola: dadosEscolas.length > 0 ? dadosEscolas[0] : null
+                });
+                
+                if (!dadosEscolas || dadosEscolas.length === 0) {
+                    console.error('Nenhum dado de escola foi carregado');
+                    status.innerHTML = '<span class="error">Nenhum dado de escola foi carregado. Verifique o arquivo escolas.csv.</span>';
+                    return;
+                }
+                
+                status.innerHTML = `Dados de ${dadosEscolas.length} escolas carregados. Selecione os arquivos XML para processar.`;
+                
+                // Verificar se há regionais e municípios nos dados
+                const regionaisUnicas = new Set(dadosEscolas.map(e => e.regional).filter(r => r && r.trim() !== ''));
+                const municipiosUnicos = new Set(dadosEscolas.map(e => e.municipio).filter(m => m && m.trim() !== ''));
+                
+                console.log(`Verificação de dados: ${regionaisUnicas.size} regionais e ${municipiosUnicos.size} municípios únicos encontrados`);
+                
+                // Preencher filtros com os dados das escolas
+                console.log('Chamando preencherFiltros com', dadosEscolas.length, 'escolas');
+                preencherFiltros(dadosEscolas);
+                
+                // Verificar se os filtros foram preenchidos
+                console.log('Verificando se os filtros foram preenchidos:', {
+                    filterRegionalOptions: filterRegional.options.length,
+                    filterMunicipioOptions: filterMunicipio.options.length
+                });
+                
+                if (filterRegional.options.length <= 1) {
+                    console.warn('Filtro de regionais não foi preenchido!');
+                    status.innerHTML += '<br><span class="warning">Aviso: Não foi possível preencher o filtro de regionais.</span>';
+                }
+                
+                if (filterMunicipio.options.length <= 1) {
+                    console.warn('Filtro de municípios não foi preenchido!');
+                    status.innerHTML += '<br><span class="warning">Aviso: Não foi possível preencher o filtro de municípios.</span>';
+                }
+            } catch (error) {
+                console.error('Erro ao carregar dados das escolas:', error);
+                document.getElementById('status').innerHTML = '<span class="error">Erro ao carregar dados das escolas. Verifique se o arquivo escolas.csv está disponível.</span>';
+            }
+            
+            // Processar arquivos selecionados
+            xmlFilesInput.addEventListener('change', async function() {
+                const files = xmlFilesInput.files;
+                if (files.length > 0) {
+                    dadosProcessados = await processarArquivosManualmente(files);
+                } else {
+                    document.getElementById('status').innerHTML = '<span class="error">Por favor, selecione pelo menos um arquivo XML.</span>';
+                }
+            });
+            
+            // Exportar para Excel
+            exportExcelBtn.addEventListener('click', function() {
+                if (dadosProcessados.length > 0) {
+                    exportarParaExcel(dadosProcessados);
+                } else {
+                    alert('Não há dados para exportar. Por favor, selecione arquivos XML primeiro.');
+                }
+            });
+            
+            // Exportar para CSV
+            exportCsvBtn.addEventListener('click', function() {
+                if (dadosProcessados.length > 0) {
+                    exportarParaCSV(dadosProcessados);
+                } else {
+                    alert('Não há dados para exportar. Por favor, selecione arquivos XML primeiro.');
+                }
+            });
+            
+            // Exportar escolas para Excel
+            const exportEscolasExcelBtn = document.getElementById('exportEscolasExcelBtn');
+            if (exportEscolasExcelBtn) {
+                exportEscolasExcelBtn.addEventListener('click', function() {
+                    exportarEscolasParaExcel();
+                });
+            }
+            
+            // Exportar escolas para CSV
+            const exportEscolasCsvBtn = document.getElementById('exportEscolasCsvBtn');
+            if (exportEscolasCsvBtn) {
+                exportEscolasCsvBtn.addEventListener('click', function() {
+                    exportarEscolasParaCSV();
+                });
+            }
+            
+            // Filtrar tabela de notas fiscais
+            filterInput.addEventListener('keyup', filtrarTabela);
+            
+            // Filtrar tabela de escolas
+            if (filterInputEscolas) {
+                filterInputEscolas.addEventListener('keyup', filtrarTabelaEscolas);
+            }
+            
+            // Adicionar eventos para os filtros da aba Notas Fiscais
+            document.getElementById('filterRegional').addEventListener('change', aplicarFiltros);
+            document.getElementById('filterMunicipio').addEventListener('change', aplicarFiltros);
+            document.getElementById('filterEscola').addEventListener('keyup', aplicarFiltros);
+            
+            // Adicionar eventos para os filtros da aba Escolas
+            if (filterRegionalEscolas) {
+                filterRegionalEscolas.addEventListener('change', aplicarFiltrosEscolas);
+            }
+            
+            if (filterMunicipioEscolas) {
+                filterMunicipioEscolas.addEventListener('change', aplicarFiltrosEscolas);
+            }
+            
+            if (filterStatusEscolas) {
+                filterStatusEscolas.addEventListener('change', aplicarFiltrosEscolas);
+            }
+            
+            // Preencher os filtros da aba Escolas
+            preencherFiltrosEscolas();
+        });
+        
+        // Funções de exportação para a tabela de escolas
+        function exportarEscolasParaExcel() {
+            const table = document.getElementById('tabelaEscolas');
+            if (!table || !dadosEscolas || dadosEscolas.length === 0) {
+                alert('Não há dados de escolas para exportar!');
+                return;
+            }
+            
+            const wb = XLSX.utils.book_new();
+            
+            // Preparar dados para exportação
+            const data = [];
+            
+            // Cabeçalho
+            const headers = ['CENSO', 'Nome da Escola', 'Regional', 'Município', 'Status', 'Quantidade de Notas'];
+            data.push(headers);
+            
+            // Obter todas as linhas visíveis da tabela
+            const rows = Array.from(table.querySelectorAll('tbody tr:not([style*="display: none"])'))
+                .filter(row => !row.classList.contains('notas-container'));
+            
+            // Adicionar dados de cada linha
+            rows.forEach(row => {
+                const rowData = [];
+                // Colunas 0-3: CENSO, Nome, Regional, Município
+                for (let i = 0; i < 4; i++) {
+                    rowData.push(row.cells[i].textContent.trim());
+                }
+                
+                // Coluna 4: Status (extrair texto do badge)
+                const statusBadge = row.cells[4].querySelector('.badge');
+                rowData.push(statusBadge ? statusBadge.textContent.trim() : '');
+                
+                // Coluna 5: Quantidade de Notas
+                const qtdNotas = row.getAttribute('data-notas-count') || '0';
+                rowData.push(qtdNotas);
+                
+                data.push(rowData);
+            });
+            
+            const ws = XLSX.utils.aoa_to_sheet(data);
+            XLSX.utils.book_append_sheet(wb, ws, 'Escolas');
+            XLSX.writeFile(wb, 'escolas_exportadas.xlsx');
+        }
+        
+        function exportarEscolasParaCSV() {
+            const table = document.getElementById('tabelaEscolas');
+            if (!table || !dadosEscolas || dadosEscolas.length === 0) {
+                alert('Não há dados de escolas para exportar!');
+                return;
+            }
+            
+            // Preparar dados para exportação
+            let csvContent = 'CENSO,Nome da Escola,Regional,Município,Status,Quantidade de Notas\n';
+            
+            // Obter todas as linhas visíveis da tabela
+            const rows = Array.from(table.querySelectorAll('tbody tr:not([style*="display: none"])'))
+                .filter(row => !row.classList.contains('notas-container'));
+            
+            // Adicionar dados de cada linha
+            rows.forEach(row => {
+                const rowData = [];
+                // Colunas 0-3: CENSO, Nome, Regional, Município
+                for (let i = 0; i < 4; i++) {
+                    // Escapar aspas e adicionar aspas ao redor do texto para lidar com vírgulas
+                    const cellText = row.cells[i].textContent.trim().replace(/"/g, '""');
+                    rowData.push(`"${cellText}"`);
+                }
+                
+                // Coluna 4: Status (extrair texto do badge)
+                const statusBadge = row.cells[4].querySelector('.badge');
+                const statusText = statusBadge ? statusBadge.textContent.trim().replace(/"/g, '""') : '';
+                rowData.push(`"${statusText}"`);
+                
+                // Coluna 5: Quantidade de Notas
+                const qtdNotas = row.getAttribute('data-notas-count') || '0';
+                rowData.push(qtdNotas);
+                
+                csvContent += rowData.join(',') + '\n';
+            });
+            
+            // Criar e baixar o arquivo CSV
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', 'escolas_exportadas.csv');
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+        
+        // Adicionar event listeners para os botões de exportação da tabela de escolas
+        const exportEscolasExcelBtn = document.getElementById('exportEscolasExcelBtn');
+        if (exportEscolasExcelBtn) {
+            exportEscolasExcelBtn.addEventListener('click', exportarEscolasParaExcel);
+        }
+        
+        const exportEscolasCsvBtn = document.getElementById('exportEscolasCsvBtn');
+        if (exportEscolasCsvBtn) {
+            exportEscolasCsvBtn.addEventListener('click', exportarEscolasParaCSV);
+        }
+        
+        // Funções globais para o onclick funcionar
+        window.toggleProdutos = toggleProdutos;
+        window.copiarParaClipboard = copiarParaClipboard;
+        window.toggleNotasEscola = toggleNotasEscola;
+    </script>
+    
+    <!-- Modal para exibir produtos -->
+    <div id="produtosModal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal">&times;</span>
+            <div id="produtosModalContent"></div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
