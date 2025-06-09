@@ -187,6 +187,9 @@
     </div>
 
     <script>
+        // Variáveis globais
+        let notasPorEscola = {};
+        
         // Função para extrair texto de um elemento XML
         function getElementText(element, xpath, namespaces) {
             if (!element) return 'N/A';
@@ -895,10 +898,17 @@
             resultContainer.classList.remove('hidden');
             
             // Ativar a aba de Notas Fiscais por padrão
-            document.getElementById('notasFiscaisTab').classList.add('active');
-            document.getElementById('escolasTab').classList.remove('active');
-            document.querySelector('a[href="#notasFiscaisTab"]').classList.add('active');
-            document.querySelector('a[href="#escolasTab"]').classList.remove('active');
+            // Usando os seletores corretos para as abas do Bootstrap 5
+            const notasTab = document.getElementById('notas-tab');
+            const escolasTab = document.getElementById('escolas-tab');
+            const notasContent = document.getElementById('notas-content');
+            const escolasContent = document.getElementById('escolas-content');
+            
+            // Verificar se os elementos existem antes de manipular suas classes
+            if (notasTab) notasTab.classList.add('active');
+            if (escolasTab) escolasTab.classList.remove('active');
+            if (notasContent) notasContent.classList.add('active', 'show');
+            if (escolasContent) escolasContent.classList.remove('active', 'show');
             
             return dadosNFes;
         }
@@ -1427,8 +1437,8 @@
                 return;
             }
             
-            // Contar notas por escola
-            const notasPorEscola = {};
+            // Contar notas por escola - usando a variável global
+            notasPorEscola = {};
             
             // Inicializar todas as escolas com 0 notas
             dadosEscolas.forEach(escola => {
@@ -1553,15 +1563,21 @@
                 }
             });
             
-            // Atualizar contadores
+            // Atualizar contadores - inicialmente com todas as escolas
             const totalEscolas = escolasArray.length;
             const escolasSemNotas = escolasArray.filter(e => e.quantidadeNotas === 0).length;
             const escolasComUmaNota = escolasArray.filter(e => e.quantidadeNotas === 1).length;
             const escolasComDuasNotas = escolasArray.filter(e => e.quantidadeNotas === 2).length;
             const escolasComMaisNotas = escolasArray.filter(e => e.quantidadeNotas > 2).length;
             
+            // Calcular valores totais
+            const valorTotal = escolasArray.reduce((total, escola) => {
+                return total + escola.notas.reduce((subtotal, nota) => subtotal + (parseFloat(nota.valorLiquido) || 0), 0);
+            }, 0);
+            
             // Criar resumo estatístico
             const resumoDiv = document.createElement('div');
+            resumoDiv.id = 'resumoEscolas';
             resumoDiv.className = 'alert alert-info mb-4';
             resumoDiv.innerHTML = `
                 <h5>📊 Resumo das Escolas</h5>
@@ -1571,6 +1587,7 @@
                     <li><strong>Escolas com 1 nota fiscal:</strong> ${escolasComUmaNota} (${Math.round(escolasComUmaNota/totalEscolas*100)}%)</li>
                     <li><strong>Escolas com 2 notas fiscais:</strong> ${escolasComDuasNotas} (${Math.round(escolasComDuasNotas/totalEscolas*100)}%)</li>
                     <li><strong>Escolas com mais de 2 notas:</strong> ${escolasComMaisNotas} (${Math.round(escolasComMaisNotas/totalEscolas*100)}%)</li>
+                    <li><strong>Valor total das notas:</strong> ${formatarMoeda(valorTotal)}</li>
                 </ul>
             `;
             
@@ -1599,6 +1616,11 @@
             const status = document.getElementById('filterStatusEscolas').value;
             const linhas = document.getElementById('escolasBody').getElementsByTagName('tr');
             
+            // Arrays para armazenar escolas visíveis após filtros
+            const escolasVisiveis = [];
+            
+            console.log('Aplicando filtros - Regional:', regional, 'Município:', municipio, 'Status:', status);
+            
             for (let i = 0; i < linhas.length; i++) {
                 const linha = linhas[i];
                 
@@ -1610,6 +1632,7 @@
                 const colunas = linha.getElementsByTagName('td');
                 if (colunas.length < 5) continue; // Pular linhas sem colunas suficientes
                 
+                const escolaCenso = colunas[0].textContent;
                 const escolaRegional = colunas[2].textContent;
                 const escolaMunicipio = colunas[3].textContent;
                 const escolaStatus = colunas[4].textContent;
@@ -1641,6 +1664,25 @@
                 
                 linha.style.display = mostrar ? '' : 'none';
                 
+                // Se a escola está visível, adicionar ao array de escolas visíveis
+                if (mostrar) {
+                    // Encontrar a escola correspondente nos dados originais
+                    // Primeiro, procurar no notasPorEscola que tem as informações de notas
+                    const escolaComNotas = Object.values(notasPorEscola).find(e => e.censo === escolaCenso);
+                    if (escolaComNotas) {
+                        escolasVisiveis.push(escolaComNotas);
+                    } else {
+                        // Se não encontrar no notasPorEscola, procurar nos dadosEscolas
+                        const escola = dadosEscolas.find(e => e.censo === escolaCenso);
+                        if (escola) {
+                            // Criar uma cópia com a propriedade notas vazia
+                            const escolaCopia = { ...escola, notas: [], quantidadeNotas: 0 };
+                            escolasVisiveis.push(escolaCopia);
+                            console.log(`Escola ${escola.nome} (${escola.censo}) não encontrada em notasPorEscola. Adicionada com notas vazias.`);
+                        }
+                    }
+                }
+                
                 // Se esta linha tem notas expandidas, esconder também
                 const censoMatch = linha.querySelector('td:first-child');
                 if (censoMatch && censoMatch.textContent) {
@@ -1650,6 +1692,79 @@
                         notasDiv.style.display = mostrar ? (notasDiv.classList.contains('hidden') ? 'none' : '') : 'none';
                     }
                 }
+            }
+            
+            console.log(`Filtros aplicados: ${escolasVisiveis.length} escolas visíveis de ${dadosEscolas.length} total`);
+            
+            // Atualizar o resumo estatístico com base nas escolas visíveis
+            atualizarResumoEscolas(escolasVisiveis);
+        }
+        
+        // Função para atualizar o resumo estatístico das escolas
+        function atualizarResumoEscolas(escolasVisiveis) {
+            // Se não houver escolas visíveis, não fazer nada
+            if (!escolasVisiveis || escolasVisiveis.length === 0) return;
+            
+            console.log('Atualizando resumo com', escolasVisiveis.length, 'escolas visíveis');
+            
+            // Verificar e corrigir escolas sem a propriedade notas ou quantidadeNotas
+            escolasVisiveis.forEach(escola => {
+                if (!escola.notas) {
+                    escola.notas = [];
+                }
+                if (escola.quantidadeNotas === undefined) {
+                    escola.quantidadeNotas = escola.notas.length;
+                    console.log(`Escola ${escola.nome} (${escola.censo}) não tem a propriedade quantidadeNotas. Definido como ${escola.notas.length}.`);
+                }
+            });
+            
+            // Calcular contadores para escolas visíveis usando quantidadeNotas
+            const totalEscolas = escolasVisiveis.length;
+            const escolasSemNotas = escolasVisiveis.filter(e => e.quantidadeNotas === 0).length;
+            const escolasComUmaNota = escolasVisiveis.filter(e => e.quantidadeNotas === 1).length;
+            const escolasComDuasNotas = escolasVisiveis.filter(e => e.quantidadeNotas === 2).length;
+            const escolasComMaisNotas = escolasVisiveis.filter(e => e.quantidadeNotas > 2).length;
+            
+            // Verificar se a soma dos contadores bate com o total
+            const somaContadores = escolasSemNotas + escolasComUmaNota + escolasComDuasNotas + escolasComMaisNotas;
+            if (somaContadores !== totalEscolas) {
+                console.warn(`Inconsistência nos contadores: Total=${totalEscolas}, Soma=${somaContadores}`);
+                console.log('Sem notas:', escolasSemNotas);
+                console.log('1 nota:', escolasComUmaNota);
+                console.log('2 notas:', escolasComDuasNotas);
+                console.log('Mais de 2:', escolasComMaisNotas);
+                
+                // Verificar escolas com problemas
+                escolasVisiveis.forEach(escola => {
+                    if (escola.quantidadeNotas !== escola.notas.length) {
+                        console.log(`Inconsistência: Escola ${escola.nome} (${escola.censo}) tem quantidadeNotas=${escola.quantidadeNotas} mas notas.length=${escola.notas.length}`);
+                    }
+                });
+            }
+            
+            // Calcular valor total das notas
+            const valorTotal = escolasVisiveis.reduce((total, escola) => {
+                if (!escola.notas) return total;
+                return total + escola.notas.reduce((subtotal, nota) => subtotal + (parseFloat(nota.valorLiquido) || 0), 0);
+            }, 0);
+            
+            // Atualizar o resumo
+            const resumoDiv = document.getElementById('resumoEscolas');
+            if (resumoDiv) {
+                // Só mostrar (Filtrado) se realmente estiver filtrado
+                const filtrado = escolasVisiveis.length < dadosEscolas.length;
+                
+                resumoDiv.innerHTML = `
+                    <h5>📊 Resumo das Escolas ${filtrado ? '(Filtrado)' : ''}</h5>
+                    <ul>
+                        <li><strong>Total de escolas:</strong> ${totalEscolas}</li>
+                        <li><strong>Escolas sem notas fiscais:</strong> ${escolasSemNotas} (${Math.round(escolasSemNotas/totalEscolas*100)}%)</li>
+                        <li><strong>Escolas com 1 nota fiscal:</strong> ${escolasComUmaNota} (${Math.round(escolasComUmaNota/totalEscolas*100)}%)</li>
+                        <li><strong>Escolas com 2 notas fiscais:</strong> ${escolasComDuasNotas} (${Math.round(escolasComDuasNotas/totalEscolas*100)}%)</li>
+                        <li><strong>Escolas com mais de 2 notas:</strong> ${escolasComMaisNotas} (${Math.round(escolasComMaisNotas/totalEscolas*100)}%)</li>
+                        <li><strong>Valor total das notas:</strong> ${formatarMoeda(valorTotal)}</li>
+                    </ul>
+                `;
             }
         }
         
